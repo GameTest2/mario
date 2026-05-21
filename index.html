@@ -2,110 +2,116 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>マリオ風ミニゲーム</title>
+    <title>3D Minecraft Prototype</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #5c94fc; }
-        canvas { display: block; background: #5c94fc; margin: 20px auto; border: 2px solid #000; }
-        #msg { text-align: center; color: white; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #87ceeb; }
+        #crosshair {
+            position: fixed; top: 50%; left: 50%;
+            width: 20px; height: 20px;
+            color: white; font-size: 20px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        #info {
+            position: fixed; top: 10px; left: 10px;
+            color: white; font-family: sans-serif;
+            background: rgba(0,0,0,0.5); padding: 10px;
+        }
     </style>
 </head>
 <body>
-    <div id="msg"><h2>左右キーで移動 / 上キーでジャンプ</h2></div>
-    <canvas id="gameCanvas" width="600" height="400"></canvas>
+    <div id="crosshair">+</div>
+    <div id="info">画面をクリックしてスタート<br>WASDで移動 / マウスで視点</div>
 
-<script>
-    //コードスタート
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+    <!-- ここでThree.js本体と操作用ライブラリを読み込み -->
+    <script src="https://cloudflare.com"></script>
+    <script src="https://jsdelivr.net"></script>
 
-// ゲーム設定
-const player = { x: 50, y: 300, w: 30, h: 30, vx: 0, vy: 0, color: "red", jumping: false };
-const gravity = 0.8;
-const platforms = [
-    { x: 0, y: 350, w: 1000, h: 50 }, // 地面
-    { x: 200, y: 250, w: 100, h: 20 }, // 浮島1
-    { x: 400, y: 180, w: 100, h: 20 }  // 浮島2
-];
-let enemies = [{ x: 350, y: 320, w: 30, h: 30, speed: -2 }];
-const keys = {};
+    <script>
+        // --- 設定 ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb); // 空色
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
 
-// キー入力検知
-window.addEventListener("keydown", e => keys[e.code] = true);
-window.addEventListener("keyup", e => keys[e.code] = false);
+        // --- 操作（ポインターロック） ---
+        const controls = new THREE.PointerLockControls(camera, document.body);
+        document.body.addEventListener('click', () => controls.lock());
 
-function update() {
-    // 左右移動
-    if (keys["ArrowLeft"]) player.vx = -5;
-    else if (keys["ArrowRight"]) player.vx = 5;
-    else player.vx = 0;
+        // --- 地面の作成 ---
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshLambertMaterial({ color: 0x33aa33 }); // 草の緑
 
-    // ジャンプ
-    if ((keys["ArrowUp"] || keys["Space"]) && !player.jumping) {
-        player.vy = -15;
-        player.jumping = true;
-    }
-
-    // 重力適用
-    player.vy += gravity;
-    player.x += player.vx;
-    player.y += player.vy;
-
-    // 床との当たり判定
-    player.jumping = true;
-    platforms.forEach(p => {
-        if (player.x < p.x + p.w && player.x + player.w > p.x &&
-            player.y + player.h > p.y && player.y + player.h < p.y + p.h) {
-            player.y = p.y - player.h;
-            player.vy = 0;
-            player.jumping = false;
-        }
-    });
-
-    // 敵の移動と判定
-    enemies.forEach((en, i) => {
-        en.x += en.speed;
-        if (en.x < 0 || en.x > 570) en.speed *= -1; // 壁で跳ね返る
-
-        // プレイヤーとの接触
-        if (player.x < en.x + en.w && player.x + player.w > en.x &&
-            player.y < en.y + en.h && player.y + player.h > en.y) {
-            if (player.vy > 0) { // 上から踏んだ
-                enemies.splice(i, 1);
-                player.vy = -10;
-            } else { // 横から当たった
-                alert("Game Over!");
-                location.reload();
+        for (let x = -10; x < 10; x++) {
+            for (let z = -10; z < 10; z++) {
+                const cube = new THREE.Mesh(geometry, material);
+                cube.position.set(x, 0, z);
+                scene.add(cube);
             }
         }
-    });
 
-    // 画面外落下
-    if (player.y > canvas.height) {
-        alert("落下した！");
-        location.reload();
-    }
+        // --- 光源 ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        sunLight.position.set(10, 20, 10);
+        scene.add(sunLight);
 
-    draw();
-    requestAnimationFrame(update);
-}
+        camera.position.y = 2;
 
-function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // --- 移動処理 ---
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
 
-    // プレイヤー描画
-    ctx.fillStyle = player.color;
-    ctx.fillRect(player.x, player.y, player.w, player.h);
+        const onKeyDown = (event) => {
+            switch (event.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyD': moveRight = true; break;
+            }
+        };
+        const onKeyUp = (event) => {
+            switch (event.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyD': moveRight = false; break;
+            }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
 
-    // 床描画
-    ctx.fillStyle = "#8b4513";
-    platforms.forEach(p => ctx.fillRect(p.x, p.y, p.w, p.h));
+        // --- ループ ---
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls.isLocked) {
+                const delta = 0.15; // 移動速度
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize();
 
-    // 敵描画
-    ctx.fillStyle = "green";
-    enemies.forEach(en => ctx.fillRect(en.x, en.y, en.w, en.h));
-}
+                if (moveForward || moveBackward) velocity.z -= direction.z * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * delta;
 
-update();
-</script>
+                controls.moveRight(-velocity.x);
+                controls.moveForward(-velocity.z);
+
+                velocity.set(0, 0, 0); // 慣性をリセット
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // 画面リサイズ対応
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
